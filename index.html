@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Super Mart</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#1a6fd4',
+            'primary-dark': '#1558b0',
+          }
+        }
+      }
+    }
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #f0f4f8; }
+    .cart-scroll::-webkit-scrollbar { width: 4px; }
+    .cart-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    input[type="radio"] { accent-color: #1a6fd4; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useContext, createContext, useEffect, useRef } = React;
+
+/* ─────────────────── DATA ─────────────────── */
+const PRODUCTS = [
+  { id:1, name:'Maggi Noodles',    price:20, category:'Groceries',    desc:'Instant Noodles | 70g',
+    img:'images/maggi.jpg' },
+  { id:2, name:'Coca Cola',        price:46, category:'Beverages',    desc:'Soft Drink | 500ml',
+    img:'images/cocacola.jpg' },
+  { id:3, name:"Lay's Classic",    price:30, category:'Snacks',       desc:'Chips | 50g',
+    img:'images/lays.jpg' },
+  { id:4, name:'Amul Milk',        price:25, category:'Groceries',    desc:'Milk | 1 Litre',
+    img:'images/amul_milk.jpg' },
+  { id:5, name:'Fresh Tomato',     price:25, category:'Groceries',    desc:'Vegetables | 1 kg',
+    img:'images/tomato.jpg' },
+  { id:6, name:'Parle-G Biscuits', price:10, category:'Snacks',       desc:'Biscuits | 150g',
+    img:'images/parleg.jpg' },
+  { id:7, name:'Dettol Soap',      price:45, category:'Personal Care',desc:'Soap Bar | 125g',
+    img:'https://images.openfoodfacts.org/images/products/629/512/001/0150/front_en.3.400.jpg' },
+  { id:8, name:'Surf Excel',       price:120,category:'Household',    desc:'Detergent | 500g',
+    img:'https://images.openfoodfacts.org/images/products/895/100/006/2446/front_en.8.400.jpg' },
+];
+
+
+
+const CATEGORIES = ['All Products','Groceries','Beverages','Snacks','Personal Care','Household'];
+
+const SEED_ORDERS = [
+  { id:'DSM001', date:'14 Apr 2025, 10:20 AM', status:'Delivered', total:60, items:[
+    { name:'Maggi Noodles', qty:1, price:20, img: PRODUCTS[0].img },
+    { name:'Coca Cola',     qty:1, price:40, img: PRODUCTS[1].img },
+  ]},
+  { id:'DSM002', date:'16 Apr 2025, 02:15 PM', status:'Processing', total:60, items:[
+    { name:"Lay's Classic", qty:5, price:60, img: PRODUCTS[2].img },
+  ]},
+  { id:'DSM003', date:'18 Apr 2025, 11:45 AM', status:'Shipped', total:56, items:[
+    { name:'Amul Milk', qty:1, price:56, img: PRODUCTS[3].img },
+  ]},
+];
+
+/* ─────────────────── CONTEXTS ─────────────────── */
+const AuthCtx  = createContext(null);
+const CartCtx  = createContext(null);
+const PageCtx  = createContext(null);
+
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ssm_user')) || null; } catch { return null; }
+  });
+  const login  = (u) => { setUser(u); localStorage.setItem('ssm_user', JSON.stringify(u)); };
+  const logout = ()  => { setUser(null); localStorage.removeItem('ssm_user'); };
+  return <AuthCtx.Provider value={{ user, login, logout }}>{children}</AuthCtx.Provider>;
+}
+
+function CartProvider({ children }) {
+  const [items, setItems] = useState([]);
+  const addItem    = (p)  => setItems(prev => {
+    const ex = prev.find(i => i.id === p.id);
+    return ex ? prev.map(i => i.id===p.id ? {...i, qty:i.qty+1} : i) : [...prev, {...p, qty:1}];
+  });
+  const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id));
+  const updateQty  = (id, qty) => {
+    if (qty < 1) return removeItem(id);
+    setItems(prev => prev.map(i => i.id===id ? {...i, qty} : i));
+  };
+  const clearCart  = ()   => setItems([]);
+  const total = items.reduce((s,i) => s + i.price * i.qty, 0);
+  const count = items.reduce((s,i) => s + i.qty, 0);
+  return <CartCtx.Provider value={{ items, addItem, removeItem, updateQty, clearCart, total, count }}>
+    {children}
+  </CartCtx.Provider>;
+}
+
+/* ─────────────────── NAVBAR ─────────────────── */
+function Logo() {
+  return (
+    <span className="flex items-center gap-1 text-lg font-bold">
+      <i className="fas fa-shopping-cart text-primary"></i>
+      <span className="text-gray-800">Smart</span>
+      <span className="text-primary">Super Mart</span>
+    </span>
+  );
+}
+
+function Navbar({ page, setPage }) {
+  const { user, logout } = useContext(AuthCtx);
+  const { count } = useContext(CartCtx);
+  const navLink = (label, target) => (
+    <button
+      onClick={() => setPage(target)}
+      className={`text-sm font-medium pb-0.5 ${page===target ? 'text-primary border-b-2 border-primary' : 'text-gray-600 hover:text-primary'}`}
+    >{label}</button>
+  );
+  return (
+    <nav className="bg-white shadow-sm px-6 py-3 flex items-center justify-between sticky top-0 z-30">
+      <Logo />
+      <div className="flex items-center gap-6">
+        {navLink('Home','products')}
+        {navLink('Products','products')}
+        <button onClick={() => setPage('products')} className="relative text-sm font-medium text-gray-600 hover:text-primary">
+          <i className="fas fa-shopping-cart mr-1"></i>Cart
+          {count > 0 && <span className="absolute -top-2 -right-3 bg-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{count}</span>}
+        </button>
+        {navLink('Orders','orders')}
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white font-bold text-sm">
+          {user?.name?.[0]?.toUpperCase() || 'D'}
+        </div>
+        <span className="text-sm text-gray-700">Hello {user?.name || 'Dax'}</span>
+        <button onClick={() => { logout(); setPage('login'); }} className="text-xs text-gray-400 hover:text-red-500 ml-2">
+          <i className="fas fa-sign-out-alt"></i>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+/* ─────────────────── LOGIN PAGE ─────────────────── */
+function LoginPage({ setPage }) {
+  const { login } = useContext(AuthCtx);
+  const [email, setEmail]   = useState('dax@1707');
+  const [pwd,   setPwd]     = useState('1716');
+  const [show,  setShow]    = useState(false);
+  const [err,   setErr]     = useState('');
+
+  const users = JSON.parse(localStorage.getItem('ssm_users') || '[]');
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    setErr('');
+    // Check demo user
+    if (email==='dax@1707' && pwd==='1716') {
+      login({ name:'Dax', email:'dax@1707' });
+      setPage('products');
+      return;
+    }
+    const found = users.find(u => u.email===email && u.pwd===pwd);
+    if (found) { login({ name: found.name, email: found.email }); setPage('products'); }
+    else setErr('Invalid email or password.');
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+        {/* Icon */}
+        <div className="flex justify-center mb-4">
+          <div className="w-16 h-16 bg-blue-50 rounded-xl flex items-center justify-center">
+            <i className="fas fa-shopping-cart text-3xl text-primary"></i>
+          </div>
+        </div>
+        <h2 className="text-center text-gray-700 text-base mb-1">Welcome to</h2>
+        <h1 className="text-center text-2xl font-bold mb-1">
+          <span className="text-gray-800">Smart </span><span className="text-primary">Super Mart</span>
+        </h1>
+        <p className="text-center text-gray-500 text-sm mb-6">Your one stop shop for everything you need!</p>
+
+        {err && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-2 mb-4">{err}</div>}
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="relative">
+            <i className="fas fa-user absolute left-3 top-3 text-gray-400"></i>
+            <input value={email} onChange={e=>setEmail(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Email" type="email" required />
+          </div>
+          <div className="relative">
+            <i className="fas fa-lock absolute left-3 top-3 text-gray-400"></i>
+            <input value={pwd} onChange={e=>setPwd(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg pl-9 pr-10 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Password" type={show ? 'text' : 'password'} required />
+            <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
+              <i className={`fas ${show ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+            </button>
+          </div>
+          <button type="submit"
+            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-2.5 rounded-lg transition-colors">
+            Login
+          </button>
+        </form>
+        <p className="text-center text-sm text-gray-500 mt-4">
+          Don't have an account?{' '}
+          <button onClick={() => setPage('register')} className="text-primary font-semibold hover:underline">Register</button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────── REGISTER PAGE ─────────────────── */
+function RegisterPage({ setPage }) {
+  const { login } = useContext(AuthCtx);
+  const [form, setForm] = useState({ name:'', email:'', pwd:'', cpwd:'' });
+  const [err, setErr]   = useState('');
+  const set = (k) => (e) => setForm(f => ({...f, [k]: e.target.value}));
+
+  const handleRegister = (e) => {
+    e.preventDefault();
+    setErr('');
+    if (form.pwd !== form.cpwd) { setErr('Passwords do not match.'); return; }
+    if (form.pwd.length < 4)   { setErr('Password must be at least 4 characters.'); return; }
+    const users = JSON.parse(localStorage.getItem('ssm_users') || '[]');
+    if (users.find(u => u.email === form.email)) { setErr('Email already registered.'); return; }
+    users.push({ name: form.name, email: form.email, pwd: form.pwd });
+    localStorage.setItem('ssm_users', JSON.stringify(users));
+    login({ name: form.name, email: form.email });
+    setPage('products');
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+        <div className="flex justify-center mb-4">
+          <div className="w-16 h-16 bg-blue-50 rounded-xl flex items-center justify-center">
+            <i className="fas fa-user-plus text-3xl text-primary"></i>
+          </div>
+        </div>
+        <h1 className="text-center text-2xl font-bold mb-1">
+          <span className="text-gray-800">Create </span><span className="text-primary">Account</span>
+        </h1>
+        <p className="text-center text-gray-500 text-sm mb-6">Join Smart Super Mart today!</p>
+
+        {err && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-2 mb-4">{err}</div>}
+
+        <form onSubmit={handleRegister} className="space-y-4">
+          {[
+            { k:'name',  icon:'fa-user',    type:'text',     ph:'Full Name' },
+            { k:'email', icon:'fa-envelope', type:'email',   ph:'Email' },
+            { k:'pwd',   icon:'fa-lock',    type:'password', ph:'Password' },
+            { k:'cpwd',  icon:'fa-lock',    type:'password', ph:'Confirm Password' },
+          ].map(({k,icon,type,ph}) => (
+            <div key={k} className="relative">
+              <i className={`fas ${icon} absolute left-3 top-3 text-gray-400`}></i>
+              <input value={form[k]} onChange={set(k)} type={type} placeholder={ph} required
+                className="w-full border border-gray-200 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+            </div>
+          ))}
+          <button type="submit"
+            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-2.5 rounded-lg transition-colors">
+            Register
+          </button>
+        </form>
+        <p className="text-center text-sm text-gray-500 mt-4">
+          Already have an account?{' '}
+          <button onClick={() => setPage('login')} className="text-primary font-semibold hover:underline">Login</button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────── PRODUCT CARD ─────────────────── */
+function ProductCard({ product }) {
+  const { addItem } = useContext(CartCtx);
+  const [added, setAdded] = useState(false);
+  const handleAdd = () => {
+    addItem(product);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1200);
+  };
+  return (
+    <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col items-center">
+    <div className="w-full h-36 rounded-lg overflow-hidden bg-white border border-gray-100 flex items-center justify-center mb-3 p-2">
+        <img src={product.img} alt={product.name} className="max-h-full max-w-full object-contain"
+          onError={e => {
+            e.target.onerror = null;
+            e.target.src = `https://placehold.co/200x200/e0f0ff/1a6fd4?text=${encodeURIComponent(product.name)}`;
+          }} />
+      </div>
+      <h3 className="font-semibold text-gray-800 text-sm text-center mb-0.5">{product.name}</h3>
+      <p className="text-primary font-bold text-sm mb-0.5">Rs. {product.price}</p>
+      <p className="text-gray-400 text-xs text-center mb-3">{product.desc}</p>
+      <button onClick={handleAdd}
+        className={`w-full text-sm font-medium py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all ${added ? 'bg-green-500 text-white' : 'bg-blue-50 hover:bg-primary hover:text-white text-primary border border-primary'}`}>
+        <i className={`fas ${added ? 'fa-check' : 'fa-cart-plus'}`}></i>
+        {added ? 'Added!' : 'Add to Cart'}
+      </button>
+    </div>
+  );
+}
+
+/* ─────────────────── CART DRAWER ─────────────────── */
+function CartDrawer({ setPage }) {
+  const { items, removeItem, updateQty, total, count } = useContext(CartCtx);
+  return (
+    <div className="w-72 flex-shrink-0">
+      <div className="bg-white rounded-xl shadow-sm p-4 sticky top-20">
+        <h2 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+          <i className="fas fa-shopping-cart text-primary"></i>
+          My Cart {count > 0 && <span className="bg-primary text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">{count}</span>}
+        </h2>
+        {items.length === 0 ? (
+          <div className="text-center py-8 text-gray-400">
+            <i className="fas fa-shopping-cart text-4xl mb-2"></i>
+            <p className="text-sm">Your cart is empty</p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3 max-h-64 overflow-y-auto cart-scroll mb-3">
+              {items.map(item => (
+                <div key={item.id} className="flex items-center gap-2">
+                  <img src={item.img} alt={item.name} className="w-10 h-10 object-contain flex-shrink-0"
+                    onError={e => { e.target.src='https://via.placeholder.com/40'; }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-700 truncate">{item.name}</p>
+                    <p className="text-xs text-primary font-bold">Rs. {item.price * item.qty}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => updateQty(item.id, item.qty-1)} className="w-5 h-5 rounded border border-gray-300 flex items-center justify-center text-xs hover:bg-gray-100">−</button>
+                    <span className="text-xs w-4 text-center">{item.qty}</span>
+                    <button onClick={() => updateQty(item.id, item.qty+1)} className="w-5 h-5 rounded border border-gray-300 flex items-center justify-center text-xs hover:bg-gray-100">+</button>
+                  </div>
+                  <button onClick={() => removeItem(item.id)} className="text-gray-300 hover:text-red-400 text-xs ml-1">
+                    <i className="fas fa-trash"></i>
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="border-t pt-3">
+              <div className="flex justify-between text-sm font-bold text-gray-800 mb-3">
+                <span>Total:</span>
+                <span className="text-primary">Rs. {total}</span>
+              </div>
+              <button onClick={() => setPage('checkout')}
+                className="w-full bg-primary hover:bg-primary-dark text-white text-sm font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                <i className="fas fa-credit-card"></i>
+                Proceed to Checkout
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────── PRODUCTS PAGE ─────────────────── */
+function ProductsPage({ setPage }) {
+  const [category, setCategory] = useState('All Products');
+  const [search,   setSearch]   = useState('');
+  const [sort,     setSort]     = useState('Popularity');
+
+  const filtered = PRODUCTS.filter(p =>
+    (category === 'All Products' || p.category === category) &&
+    p.name.toLowerCase().includes(search.toLowerCase())
+  );
+  const sorted = [...filtered].sort((a,b) =>
+    sort === 'Price: Low to High' ? a.price-b.price :
+    sort === 'Price: High to Low' ? b.price-a.price : 0
+  );
+
+  return (
+    <div className="p-4 md:p-6">
+      {/* Search */}
+      <div className="flex gap-2 mb-5">
+        <div className="relative flex-1">
+          <i className="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Search for products..."
+            className="w-full border border-gray-200 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary bg-white" />
+        </div>
+        <button className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors">
+          Search
+        </button>
+      </div>
+
+      <div className="flex gap-4">
+        {/* Sidebar */}
+        <div className="w-44 flex-shrink-0">
+          <div className="bg-white rounded-xl shadow-sm p-3">
+            {CATEGORIES.map(cat => (
+              <button key={cat} onClick={() => setCategory(cat)}
+                className={`w-full text-left text-sm px-3 py-2 rounded-lg mb-0.5 flex items-center gap-2 transition-colors ${
+                  category===cat ? 'bg-blue-50 text-primary font-semibold' : 'text-gray-600 hover:bg-gray-50'
+                }`}>
+                <i className={`fas text-xs ${
+                  cat==='All Products'   ? 'fa-th-large' :
+                  cat==='Groceries'      ? 'fa-apple-alt' :
+                  cat==='Beverages'      ? 'fa-coffee' :
+                  cat==='Snacks'         ? 'fa-cookie-bite' :
+                  cat==='Personal Care'  ? 'fa-pump-soap' : 'fa-home'
+                }`}></i>
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Main */}
+        <div className="flex-1">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold text-gray-800">{category}</h2>
+            <select value={sort} onChange={e=>setSort(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-primary bg-white text-gray-700">
+              <option>Popularity</option>
+              <option>Price: Low to High</option>
+              <option>Price: High to Low</option>
+            </select>
+          </div>
+          {sorted.length === 0
+            ? <div className="text-center py-16 text-gray-400"><i className="fas fa-box-open text-5xl mb-3"></i><p>No products found.</p></div>
+            : <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {sorted.map(p => <ProductCard key={p.id} product={p} />)}
+              </div>
+          }
+        </div>
+
+        {/* Cart */}
+        <CartDrawer setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────── CHECKOUT PAGE ─────────────────── */
+function CheckoutPage({ setPage }) {
+  const { items, total, clearCart } = useContext(CartCtx);
+  const { user } = useContext(AuthCtx);
+  const [step, setStep] = useState(1);
+  const [addr, setAddr] = useState({ name: user?.name||'', email: user?.email||'', phone:'', address:'', city:'' });
+  const [payment, setPayment] = useState('cod');
+  const [placed, setPlaced] = useState(false);
+  const setA = k => e => setAddr(f=>({...f, [k]: e.target.value}));
+
+  const placeOrder = () => {
+    const orders = JSON.parse(localStorage.getItem('ssm_orders') || '[]');
+    const newOrder = {
+      id: 'DSM' + String(orders.length + 4).padStart(3,'0'),
+      date: new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+      status: 'Processing',
+      total,
+      items: items.map(i=>({ name:i.name, qty:i.qty, price:i.price*i.qty, img:i.img })),
+    };
+    orders.unshift(newOrder);
+    localStorage.setItem('ssm_orders', JSON.stringify(orders));
+    clearCart();
+    setPlaced(true);
+  };
+
+  if (placed) return (
+    <div className="min-h-[80vh] flex items-center justify-center">
+      <div className="bg-white rounded-2xl shadow-lg p-10 text-center max-w-sm">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i className="fas fa-check-circle text-3xl text-green-500"></i>
+        </div>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Order Placed!</h2>
+        <p className="text-gray-500 text-sm mb-6">Your order will be delivered soon. We'll notify you when it's dispatched.</p>
+        <button onClick={() => setPage('orders')} className="bg-primary text-white px-6 py-2.5 rounded-lg font-medium hover:bg-primary-dark transition-colors">
+          View My Orders
+        </button>
+      </div>
+    </div>
+  );
+
+  if (items.length === 0) return (
+    <div className="min-h-[80vh] flex items-center justify-center">
+      <div className="bg-white rounded-2xl shadow-lg p-10 text-center max-w-sm">
+        <i className="fas fa-shopping-cart text-5xl text-gray-300 mb-4"></i>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Cart is empty</h2>
+        <button onClick={() => setPage('products')} className="bg-primary text-white px-6 py-2.5 rounded-lg font-medium mt-4">
+          Shop Now
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 md:p-6">
+      {/* Step indicator */}
+      <div className="flex items-center justify-center gap-0 mb-6">
+        {[['1','Shipping Address'],['2','Payment'],['3','Review & Place Order']].map(([n,label],i) => (
+          <React.Fragment key={n}>
+            <div className="flex flex-col items-center">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
+                step > +n ? 'bg-primary border-primary text-white' :
+                step === +n ? 'border-primary text-primary bg-white' :
+                'border-gray-300 text-gray-400 bg-white'
+              }`}>{step > +n ? <i className="fas fa-check text-xs"></i> : n}</div>
+              <span className={`text-xs mt-1 text-center w-20 ${step===+n ? 'text-primary font-semibold' : 'text-gray-400'}`}>{label}</span>
+            </div>
+            {i < 2 && <div className={`w-16 h-0.5 mt-[-12px] ${step > i+1 ? 'bg-primary' : 'bg-gray-200'}`}></div>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div className="flex gap-4">
+        {/* Left panel */}
+        <div className="flex-1">
+          {step === 1 && (
+            <div className="bg-white rounded-xl shadow-sm p-5">
+              <h2 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <i className="fas fa-map-marker-alt text-primary"></i> Shipping Address
+              </h2>
+              <div className="space-y-3">
+                {[
+                  { k:'name',    label:'Full Name',     type:'text' },
+                  { k:'email',   label:'Email Address', type:'email' },
+                  { k:'phone',   label:'Phone Number',  type:'tel' },
+                  { k:'address', label:'Address',       type:'text' },
+                  { k:'city',    label:'City',          type:'text' },
+                ].map(({k,label,type}) => (
+                  <div key={k}>
+                    <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                    <input value={addr[k]} onChange={setA(k)} type={type} required
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+                  </div>
+                ))}
+              </div>
+              <h2 className="font-bold text-gray-800 mt-5 mb-3 flex items-center gap-2">
+                <i className="fas fa-credit-card text-primary"></i> Payment Method
+              </h2>
+              <div className="space-y-2">
+                {[
+                  { v:'cod', label:'Cash on Delivery', sub:'Pay when you receive your order' },
+                  { v:'upi', label:'UPI', sub:'Pay using UPI apps (Google Pay, PhonePe, etc.)' },
+                  { v:'card',label:'Card Payment', sub:'Debit / Credit Card' },
+                ].map(({v,label,sub}) => (
+                  <label key={v} className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${payment===v ? 'border-primary bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <input type="radio" name="pay" value={v} checked={payment===v} onChange={()=>setPayment(v)} className="mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{label}</p>
+                      <p className="text-xs text-gray-500">{sub}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <button
+                disabled={!addr.name || !addr.email || !addr.phone || !addr.address || !addr.city}
+                onClick={() => setStep(2)}
+                className="mt-5 w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                Continue to Payment <i className="fas fa-arrow-right"></i>
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="bg-white rounded-xl shadow-sm p-5">
+              <h2 className="font-bold text-gray-800 mb-4">Review Your Details</h2>
+              <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-1.5">
+                <p className="text-sm"><span className="font-medium text-gray-700 w-24 inline-block">Name:</span> {addr.name}</p>
+                <p className="text-sm"><span className="font-medium text-gray-700 w-24 inline-block">Email:</span> {addr.email}</p>
+                <p className="text-sm"><span className="font-medium text-gray-700 w-24 inline-block">Phone:</span> {addr.phone}</p>
+                <p className="text-sm"><span className="font-medium text-gray-700 w-24 inline-block">Address:</span> {addr.address}, {addr.city}</p>
+                <p className="text-sm"><span className="font-medium text-gray-700 w-24 inline-block">Payment:</span> {payment==='cod'?'Cash on Delivery':payment==='upi'?'UPI':'Card Payment'}</p>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={()=>setStep(1)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50">
+                  <i className="fas fa-arrow-left mr-1"></i> Back
+                </button>
+                <button onClick={()=>setStep(3)} className="flex-1 bg-primary hover:bg-primary-dark text-white py-2.5 rounded-lg text-sm font-medium transition-colors">
+                  Review Order <i className="fas fa-arrow-right ml-1"></i>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="bg-white rounded-xl shadow-sm p-5">
+              <h2 className="font-bold text-gray-800 mb-4">Place Your Order</h2>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4 flex items-center gap-2 text-sm text-blue-700">
+                <i className="fas fa-info-circle"></i>
+                Your order will be delivered soon! We'll notify you once it's dispatched.
+              </div>
+              <div className="flex gap-3">
+                <button onClick={()=>setStep(2)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50">
+                  <i className="fas fa-arrow-left mr-1"></i> Back
+                </button>
+                <button onClick={placeOrder} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors">
+                  <i className="fas fa-check mr-1"></i> Place Order
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Order Summary */}
+        <div className="w-64 flex-shrink-0">
+          <div className="bg-white rounded-xl shadow-sm p-4 sticky top-20">
+            <h2 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+              <i className="fas fa-receipt text-primary"></i> Order Summary
+            </h2>
+            <div className="space-y-3 max-h-56 overflow-y-auto cart-scroll mb-3">
+              {items.map(item => (
+                <div key={item.id} className="flex items-center gap-2">
+                  <img src={item.img} alt={item.name} className="w-10 h-10 object-contain flex-shrink-0"
+                    onError={e => { e.target.src='https://via.placeholder.com/40'; }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-700 truncate">{item.name}</p>
+                    <p className="text-xs text-gray-500">Qty: {item.qty}</p>
+                  </div>
+                  <p className="text-xs font-bold text-gray-700">Rs. {item.price*item.qty}</p>
+                </div>
+              ))}
+            </div>
+            <div className="border-t pt-3 space-y-1.5">
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>Subtotal</span><span>Rs. {total}</span>
+              </div>
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>Delivery Charges</span><span className="text-green-600">Rs. 0</span>
+              </div>
+              <div className="flex justify-between font-bold text-gray-800 pt-1 border-t">
+                <span>Total</span><span className="text-primary">Rs. {total}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────── ORDERS PAGE ─────────────────── */
+const STATUS_STYLE = {
+  Delivered:  'bg-green-100 text-green-700',
+  Processing: 'bg-blue-100 text-blue-700',
+  Shipped:    'bg-orange-100 text-orange-700',
+  Cancelled:  'bg-red-100 text-red-600',
+};
+
+function OrderCard({ order }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-4 mb-3">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="font-bold text-gray-800 text-sm">Order #{order.id}</h3>
+          <p className="text-xs text-gray-500">Placed on: {order.date}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${STATUS_STYLE[order.status] || 'bg-gray-100 text-gray-600'}`}>
+            {order.status}
+          </span>
+          <button onClick={() => setOpen(!open)} className="text-xs text-primary hover:underline flex items-center gap-1">
+            {open ? 'Hide' : 'View Details'} <i className={`fas fa-chevron-${open?'up':'right'} text-xs`}></i>
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-4">
+        {order.items.map((item,i) => (
+          <div key={i} className="flex items-center gap-2">
+            <img src={item.img} alt={item.name} className="w-10 h-10 object-contain"
+              onError={e => { e.target.src='https://via.placeholder.com/40'; }} />
+            <div>
+              <p className="text-xs font-medium text-gray-700">{item.name}</p>
+              <p className="text-xs text-gray-500">Qty: {item.qty}</p>
+              <p className="text-xs font-bold text-primary">Rs. {item.price}</p>
+            </div>
+          </div>
+        ))}
+        <div className="ml-auto text-right">
+          <p className="text-xs text-gray-500">Total Amount</p>
+          <p className="font-bold text-gray-800 text-sm">Rs. {order.total}</p>
+        </div>
+      </div>
+      {open && (
+        <div className="mt-3 pt-3 border-t">
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`w-3 h-3 rounded-full ${order.status==='Delivered'?'bg-green-500':order.status==='Shipped'?'bg-orange-400':'bg-blue-500'}`}></div>
+            <span className="text-xs text-gray-600">Status: <strong>{order.status}</strong></span>
+          </div>
+          <p className="text-xs text-gray-500">Items: {order.items.map(i=>i.name).join(', ')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrdersPage() {
+  const savedOrders = JSON.parse(localStorage.getItem('ssm_orders') || '[]');
+  const allOrders   = [...savedOrders, ...SEED_ORDERS];
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 md:p-6">
+      <div className="mb-5">
+        <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+          <i className="fas fa-clipboard-list text-primary"></i> My Orders
+        </h1>
+        <p className="text-sm text-gray-500">Track and manage your orders</p>
+      </div>
+      {allOrders.length === 0
+        ? <div className="bg-white rounded-xl shadow-sm p-10 text-center text-gray-400">
+            <i className="fas fa-box-open text-5xl mb-3"></i>
+            <p>No orders yet. Start shopping!</p>
+          </div>
+        : allOrders.map(o => <OrderCard key={o.id} order={o} />)
+      }
+    </div>
+  );
+}
+
+/* ─────────────────── ROOT APP ─────────────────── */
+function App() {
+  const { user } = useContext(AuthCtx);
+  const [page, setPage] = useState(() => user ? 'products' : 'login');
+
+  useEffect(() => {
+    if (!user && page !== 'login' && page !== 'register') setPage('login');
+  }, [user]);
+
+  const renderPage = () => {
+    if (!user) {
+      if (page === 'register') return <RegisterPage setPage={setPage} />;
+      return <LoginPage setPage={setPage} />;
+    }
+    switch(page) {
+      case 'products': return <ProductsPage setPage={setPage} />;
+      case 'checkout': return <CheckoutPage setPage={setPage} />;
+      case 'orders':   return <OrdersPage />;
+      default:         return <ProductsPage setPage={setPage} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {user && <Navbar page={page} setPage={setPage} />}
+      <main>{renderPage()}</main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <AuthProvider>
+    <CartProvider>
+      <App />
+    </CartProvider>
+  </AuthProvider>
+);
+</script>
+</body>
+</html>
